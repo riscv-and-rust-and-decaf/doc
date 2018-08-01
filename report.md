@@ -22,7 +22,7 @@
 
 第二周：完成RustOS移植。开始进行CPU的设计和实现。
 
-后三周：CPU实现和调试。
+后三周：CPU实现和调试，完善 Decaf。
 
 ### 实验结果
 
@@ -113,10 +113,44 @@ TestCases/baremetal $ make
 
 如果 `make` 在链接阶段出错, 检查 `wrjlibc` 是否使用了正确的 `HAS_LIBC` 和 `BAREMETAL`.
 
+### 遇到的挑战
+* 调试 rucore 时, mksfs 生成的镜像总是无法正确运行. 后来发现, 我使用了 x86-64 的 ucore. 换到 riscv ucore 之后即可.
+
+* 调试 baremetal 环境下时, 串口一直无输出. 后来和队友沟通发现, 是因为串口模式不对, 改为 CPLD 控制的串口之后即可.
+
 ## RustOS
 
 TODO
 
 ## CPU
+我们组使用 chisel 编码了实现 RV32I 的 CPU，使用 Verilog 实现外部设备的底层控制。
 
-TODO
+CPU 的 chisel 代码在 [github](https://github.com/riscv-and-rust-and-decaf/riscv32i-cpu-chisel),
+涉及具体上板子需要的 Vivado 工程以及一些外设的底层控制代码在 [github](https://github.com/riscv-and-rust-and-decaf/riscv32i-cpu).
+
+### 大体架构
+我们组在设计 CPU 的过程中，没有采用 Rocket / mini 的那种 Datapath + Control 的方式，而是使用了更加传统的每段流水一个模块的方式。
+在 CPU 内部，各个模块之间的关系如下图所示
+
+![](core-arch.png)
+
+### 五段流水
+RISC 的五段流水算是经典架构，所以相关背景略去。
+
+我们的实现中，五段流水通过 `IF`， `ID`， `EX`， `MEM` 模块实现。最后的 `WB` 隐含在其他模块如 `REG` 中。
+
+每个部分的职责和计原课程中的基本一样所以不再赘述。
+
+*TODO: 是否要加入每个模块的职责？虽然我认为这已经被叙述过无数次*
+
+### 访存相关
+相对于计原课程，本课程我们多实现了一个硬件完成的 TLB 重填。
+为此需要实现硬件访问页表的功能，通过 `PageTableWalker` 模块完成。
+
+### 遇到的挑战
+* 从 chisel 的入门引导文档到我们设计的 CPU 之间有很大的差距, 光看入门文档难以熟悉 chisel 语言. 我们选择了简单的 riscv-mini, 最开始阅读 riscv-mini 的实现来学习 CPU 实现中的一些写法.
+
+* 我们没有 scala 及其构建系统 sbt 的使用经验. chisel 中有很多用法都涉及到了相关内容, 尤其是测试框架那一部分. 解决办法: 未很好解决. 前期基本上没有使用 scala 的高级特性, 后期稍微熟悉后可以使用一些如 `implicit` 等语言特性.
+
+* chisel 的仿真测试只能检测输入输出信号, 无法检查内部状态. 如果想要检查内部状态, 就需要在相应的元件中加入 `printf`, 不如看波形方便.
+
