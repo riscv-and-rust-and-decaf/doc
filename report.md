@@ -115,7 +115,74 @@ TestCases/baremetal $ make
 
 ## RustOS
 
-TODO
+这部分由王润基负责。[GitHub](https://github.com/wangrunji0408/RustOS)，[简单日志](http://os.cs.tsinghua.edu.cn/oscourse/csproject2018/group05#RustOS)。
+
+在2018春操作系统大实验上，我参考uCore实现了Rust版本的简易OS，目标平台是x86_64。作为此项目的后继任务，以及本次综合实验的一个子任务，目标是将RustOS移植到RISCV32。
+
+实验结果是可以在QEMU模拟器中运行全部功能。但由于CPU进度未达预期，没能在板子上跑起来RustOS。
+
+### 开发环境
+
+- [riscv-rust/rust](https://github.com/riscv-rust/rust)：使用[官方发布的二进制版本+源码](https://github.com/riscv-rust/rust/releases/tag/riscv-rust-1.26.0-1-dev)
+- [riscv-gnu-toolchain](https://github.com/riscv/riscv-gnu-toolchain)：使用OS2018腾讯云中使用的预编译版本
+
+上述依赖已经打包制成Docker，编译运行方法详见README。
+
+由于riscv-rust工具链新鲜出炉，尚有一些不完善之处：
+
+* 如不使用M扩展，编译器会尝试自动链接内置软乘除法函数，而有的函数没有实现，造成链接错误。
+
+  解决方案：使用M扩展。
+
+* LLVM后端不完全支持A扩展。
+
+  解决方案：修改Rust核心库，将相关操作改用关中断实现。
+
+* LLVM后端不支持某些特定结构体的生成（观察都是<4bytes的）
+
+  解决方案：修改结构体定义，绕开问题。
+
+* 整套工具链还不支持RV64。
+
+### 移植过程
+
+整个过程基本参考[bbl-ucore](https://github.com/ring00/bbl-ucore)及后续的[ucore_os_lab for RISCV32](https://github.com/chyyuu/ucore_os_lab/tree/riscv32-priv-1.10)。由于RustOS本身就是参考uCore实现，加上bbl-ucore的文档足够详尽，移植过程比较顺利，仅用两周完成。在此对张蔚和石振兴的开创性工作表示感谢！
+
+以下仅对遇到的新问题展开描述：
+
+#### 1. Kernel虚实地址
+
+bbl-ucore使用RISCV1.9的bbl，ucore_os_lab使用RISCV1.10的bbl。后者相比前者，去掉了对内核的内存映射，因此需保证虚实地址一致。
+
+事实上ucore_os_lab中的虚实地址并不一致，且没有内存映射，但依然能够运行，应该是由于编译器生成的所有跳转都使用相对偏移。而Rust编译器会生成绝对地址跳转，因此若虚实不一致会导致非法访存。
+
+解决方案是调整linker script，使虚实地址一致。
+
+#### 2. 页表自映射 
+
+原x86_64版本使用页表自映射完成修改页表本身的操作。但**RISCV下的页表规范阻碍了自映射的实现**。原因是RISCV页表项中的flags，明确表示它指向的是数据页（VRW），还是下层页表（V）。假如把一个二级页表项，当做一级页表项来解读，就会触发异常。而这是自映射机制中必须的操作。
+
+为了绕开这个问题，就要求**在访问一级页表虚地址期间，将它所对应的二级页表项flags置为VRW**。此外，为了访问二级页表本身，还需要再加一个自映射的二级页表项，其flags为VRW。
+
+### 移植总结
+
+移植开始时，首先利用条件编译将全部代码禁用掉，然后逐步加入平台特定代码、恢复平台无关代码。由于当初只需面向一个平台，尽管设计时已经对跨平台有所考虑，但真正开始移植时，还需要做很多代码分离、抽出接口的工作。整个过程中，我始终保持x86版本要能正常运行，维持一个完整项目。
+
+得益于Rust的包管理系统，社区中已经有了[riscv库](https://github.com/riscv-rust/riscv)可以直接使用。我为其补充了OS所需的S-Mode指令，并从[x86_64库](https://github.com/rust-osdev/x86_64)借鉴并移植了页表模块。[Fork之后的版本](https://github.com/riscv-and-rust-and-decaf/riscv)日后经过完善也许可以提个PR贡献回去。
+
+在跨平台需求的促进下，我基本实现了上学期提到的【从内核中分离出内存管理模块和线程管理模块】的想法，并实现了平台相关与无关代码的分离。最后经过统计，各部分代码量为：
+
+* RISCV平台相关部分，不含riscv库：~500行
+* x86_64平台相关部分，不含x86_64库：~1800行
+* 内存管理模块：~1000行
+* 线程管理模块：~600行
+* 文件系统部分：~1000行
+* Kernel其它部分：~1200行
+* 共计：6000+行
+
+较好地实现了模块化与保持精简的设计初衷。
+
+关于OS的具体实现细节，待我日后再去补文档吧……
 
 ## CPU
 
